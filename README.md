@@ -29,3 +29,8 @@ gw_successful.json - output exists from responsive gateway
 [ Performance ] 
 
 Takes about 20 minutes to run 'uptime' on 300+ gateways
+
+
+[ Troubleshooting ] 
+
+(NULL BUF) = CPRID version issue or general CPRID error (sk174346)

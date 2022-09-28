@@ -218,7 +218,7 @@ exit 0'''
                     script = f'{gwbin}/tmp_info_gw-{gwip}_tmp.sh'
                     result = runcmd(cmd, script)
                     
-                    if len(result) < 1 or result == '(NULL BUF)': 
+                    if len(result) < 5: 
                         ecount += 1
                         print(f"[output] : Output Empty : {gwip} : Count {ecount}\n")
                         failures[gwip] = f"Empty List {ecount}"
@@ -233,9 +233,9 @@ exit 0'''
     try:
         for key,value in stdout.items():
             if len(value) != 0:
-                verified[key] = True
+                verified[key] = "True"
             else:
-                verified[key] = False
+                verified[key] = "False"
                 
     except Exception as e:
         traceback.print_exc()
@@ -296,7 +296,7 @@ if __name__ == "__main__":
         
         print("\n\n[ No Output or CPRID issue ]\n\n")
         for key,value in verified.items():
-            if value == False: 
+            if value == "False": 
                 print(f"Gateway {key} : Domain {mapping[key]}")
         
         fconnect = {}
