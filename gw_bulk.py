@@ -6,6 +6,7 @@ import sys
 import json
 import socket
 import time
+import csv 
 
 #Global Variables
 global shell
@@ -26,8 +27,6 @@ global gwbin
 gwbin = f'{gwpath}/scripts'
 global gwout
 gwout = f'{gwpath}/output'
-global logfile
-logfile = f'{gwpath}/gw_bulk-{now}.csv'
 global failures
 failures = {}
 global verified
@@ -80,7 +79,7 @@ command = {command}
 # make log directory / clear old log files
 def mkdir():
 
-    print(f'[ mkdir | {gwpath} | {gwbin} ]\n')
+    print(f'[ mkdir | {gwpath} | {gwbin} | {gwout}]\n')
 
     if os.path.isdir(gwpath) and os.path.isdir(gwbin) and os.path.isdir(gwout):
         print(f'... Exists!\n')
@@ -140,20 +139,20 @@ def runcmd(cmd, script):
 
     os.system(f"chmod +x {script}")
     
-    global vallist
     try:
-        vallist = subprocess.check_output(script, shell=True, text=True, timeout=30)
+        result = subprocess.check_output(script, shell=True, text=True, timeout=30)
     except Exception as e:
         traceback.print_exc()
         print(f"[runcmd] : Error : {e}")
 
     if debug == 1: 
-        print(f"[ RESULT ]\n{vallist}\n\n")
+        print(f"[ runcmd ]\n{result}\n\n")
+        pause_debug()
         os.system(f"rm -v {script}")
     else:
         os.system(f"rm {script}")
     
-    return vallist
+    return result
 
 
 def domains():
@@ -217,15 +216,15 @@ def output():
 cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{command}"
 exit 0'''
                     script = f'{gwbin}/tmp_info_gw-{gwip}_tmp.sh'
-                    results = runcmd(cmd, script)
+                    result = runcmd(cmd, script)
                     
-                    if len(results) < 1: 
+                    if len(result) < 1 or result == '(NULL BUF)': 
                         ecount += 1
                         print(f"[output] : Output Empty : {gwip} : Count {ecount}\n")
                         failures[gwip] = f"Empty List {ecount}"
                         stdout[gwip] = ''
                     else:
-                        stdout[gwip] = results
+                        stdout[gwip] = result.strip()
 
     except Exception as e:
         traceback.print_exc()
@@ -284,9 +283,6 @@ if __name__ == "__main__":
         traceback.print_exc()
         print(f"[main] : Error : {e}\n")
     finally:
-        #record failures 
-        with open('gw_failures.json', 'w') as f:
-            f.write(json.dumps(failures, indent=4, sort_keys=False))
         
         mapping = {}
 
@@ -326,10 +322,20 @@ if __name__ == "__main__":
         # output successful
         with open(f'{gwout}/gw_successful.json', 'w') as f:
             f.write(json.dumps(verified, indent=4, sort_keys=False))
+            
+        #record failures 
+        with open(f'{gwout}/gw_failures.json', 'w') as f:
+            f.write(json.dumps(failures, indent=4, sort_keys=False))
         
         # gateway -> output
         with open(f'{gwout}/gw_stdout.json', 'w') as f:
             f.write(json.dumps(stdout, indent=4, sort_keys=False))  
+            
+        fcsv = f'{gwout}/gw_stdout.csv'
+        with open(fcsv, 'w') as f:
+            w = csv.writer(f)
+            w.writerows(stdout.items())
+
 
         #end time
         endtime = time.time()
