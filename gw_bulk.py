@@ -1,91 +1,75 @@
-from socket import timeout
-import requests 
-import urllib3
-import json
-import time
+from datetime import datetime
+import traceback
+import subprocess
+import os 
 import sys
-import os
+import json
+import socket
+import time
+import pandas as pd 
 
-#remove insecure https warnings
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+#Global Variables
+global shell
+shell = '#!/bin/bash'
+global cpprofile
+cpprofile = '''source /etc/profile.d/CP.sh
+source /etc/profile.d/vsenv.sh
+source $MDSDIR/scripts/MDSprofile.sh
+source $MDS_SYSTEM/shared/mds_environment_utils.sh
+source $MDS_SYSTEM/shared/sh_utilities.sh
+'''
+global now
+nowtmp = datetime.now()
+now = nowtmp.strftime("%m-%d-%y_%H-%M-%S")
+global gwpath
+gwpath = '/var/log/gw_bulk'
+global gwbin
+gwbin = f'{gwpath}/scripts'
+global gwout
+gwout = f'{gwpath}/output'
+global logfile
+logfile = f'{gwpath}/gw_bulk-{now}.csv'
+global failures
+failures = {}
+global verified
+verified = {}
+global inventory 
+inventory = {} 
+global stdout
+stdout = {}
 
-# global variables 
-global gwbullk
-gwbulk = '/tmp/gw_bulk'
-global fpath
-fpath = f'{gwbulk}/gw_bulk_'
-global log
-log = f'{fpath}log.log'
+###Debugging Functions###
+# take any input to pause debug 
+def pause_debug():
+    input("[ DEBUG ] Press any key to continue...\n\n")   
 
-# logout of existing session and end script
-def end():
-        logout()
-        sys.exit(0)
 
-# -d or -h
-def helpmenu():
+def end(): 
+    sys.exit(0)
 
-    global debug
-    if len(sys.argv) > 1 and sys.argv[1] == "-h": 
-        print(
-            '''
-            [ Help Menu ]
-
-            Purpose: 
-            Run command against all gateways on a domain
-            OR
-            All gateways in the environment. 
-
-            Usage: 
-            ./gw_bulk OPTIONS
-
-            Options:
-            -d = Debugging
-            -h = Usage 
-
-            Notes: 
-            Built for x86_64 linux systems. 
-
-            This is a pyinstaller onefile binary
-            that includes all required modules. 
-            '''
-        )
-        end()
-    elif len(sys.argv) > 1 and sys.argv[1] == "-d":
-        print('\n[ Debug Mode Enabled ]\n') 
-        debug = 1
-    else: 
-        print('\n[ Debug Mode Disabled ]\n')
-        debug = 0
-    
-    return debug
-
-#input validation
+#input validation for questions
 def question(stuff):
     while True:
         answer = input(f"\n{stuff}:\n")
-        if len(answer) is not 0:
+        if len(answer) != 0:
             False
             return answer 
+
 
 # ask user for configuration 
 def askConfig():
 
-    print("\n[ Provide API/CMA/Domain Configuration ]\n")
+    print("\n[ Provide Configuration ]\n")
 
-    global username, password, api_ip, api_port, domain
+    global username, password, command
 
     username = question("Username")
     password = question("Password")
-    api_ip = question("API (MDM) IP Address")
-    api_port = question("API Port")
-    domain = question("Domain Name (in SmartConsole)")
+    command = question("Command to run on all gateways")
 
     formatanswer = f"""username = {username}
 password = {password}
-API IP = {api_ip}
-API Port = {api_port}
-Domain Name = {domain}
+command = {command}
 """  
 
     result = question(f"\n{formatanswer}\nIs this information correct? (y/n)")   
@@ -95,261 +79,271 @@ Domain Name = {domain}
         print("\nContinuing... \n")
 
 # make log directory / clear old log files
-def makedir():
+def mkdir():
 
-    print(f'[ Dir: {gwbulk} ]\n')
+    print(f'[ mkdir | {gwpath} | {gwbin} ]\n')
 
-    if os.path.isdir(gwbulk):
-        print(f'... {gwbulk} Exists!\n')
-        print('\n[ Clearing old logs ]\n')
-        os.system(f'rm -v {fpath}*')
+    if os.path.isdir(gwpath) and os.path.isdir(gwbin) and os.path.isdir(gwout):
+        print(f'... Exists!\n')
     else:
-        print(f'... {gwbulk} Created!\n')
-        os.mkdir(gwbulk)
-
-# sleep function
-def sleeptime(timeval): 
-    time.sleep(timeval)
-
-###Debugging Functions###
-# take any input to pause script
-def pause_debug():
-    input("\n[ DEBUG ] Press any key to continue...\n")   
-
-def pause_script():
-    input("\n[ Check and Verify ]. Press any key to continue...\n") 
-
-###API###
-# API Log
-def api_debug(defname, apiurl, headers, body, result, api_post): 
-
-    apiBugs = [
-    f"\n\n[ {defname} ]\n",
-    f"{defname} : URL : {apiurl} \n",
-    f"{defname} : Headers : {headers} \n",
-    f"{defname} : Body : {body} \n",
-    f"{defname} : JSON RESPONSE : \n{result}\n",
-    f"{defname} : Status Code: {api_post.status_code}\n"
-    ]
-
-    with open(log, 'a') as f:
-        f.writelines(apiBugs)
-
-# API Login
-def login(): 
-
-    print("\n[ Login to API ]\n")
-
-    defname = f"API : Login : {domain}"
+        print(f'... Does not exist\n')
+        os.system(f'mkdir -v {gwpath}')
+        os.system(f'mkdir -v {gwbin}')
+        os.system(f'mkdir -v {gwout}')
     
-    api_url = f'{url}/login'
-    headers = {'Content-Type' : 'application/json'}
-    body = {'user' : f'{username}', 
-            'password' : f'{password}',
-            'domain' : f'{domain}',
-            'session-timeout' : 1800}
 
-    api_post = requests.post(api_url, data = json.dumps(body), headers=headers, verify=False)
-    result = json.loads(api_post.text)
+#help menu
+def helpmenu():
 
-    sleeptime(1)
-    api_debug(defname, api_url, headers, body, result, api_post)
-
-    response = api_post.status_code
-    if response == 200: 
-        print(f'{response}... Log in Successful.\n')
+    if len(sys.argv) > 1 and sys.argv[1] == "-h": 
+        print(
+            '''
+            [ Help Menu ]
+            
+            Usage: 
+            ./gw_bulk_v2.py OPTIONS
+            
+            Options:
+            -d = Enable Debug (debug = 1)
+            -h = Help Menu
+            
+            Notes: 
+            Coming soon... 
+            '''
+        )
+        quit() 
+    elif len(sys.argv) > 1 and sys.argv[1] == "-d":
+        print('\n[ Debug Mode Enabled ]\n') 
+        global debug
+        debug = 1
     else: 
-        print(f'{response}... Login Failed.\n')
-
-    return result
-
-# API Publish 
-def publish(): 
-
-    print("\n[ Publish Changes ]\n")
-    defname = f"API : Publish : {domain}"
-
-    api_url = f'{url}/publish'
-    x = sid["sid"]
-    headers = {'Content-Type' : 'application/json',
-                'X-chkp-sid' : f'{x}'} 
-    body = {}
-
-    api_post = requests.post(api_url, data=json.dumps(body), headers=headers, verify=False)
-    result = api_post.json() 
-
-    sleeptime(1)
-    api_debug(defname, api_url, headers, body, result, api_post)
-
-    response = api_post.status_code
-    if response == 200: 
-        print(f'{response}... Publish Successful.\n')
-    else: 
-        print(f'{response}... Publish Failed.\n')
-
-# API Logout
-def logout(): 
-
-    print("\n[ Log out of session ]\n")
-
-    defname = f"API : Logout : {sid['sid']}"
-
-    api_url = f'{url}/logout'
-    x = sid["sid"]
-    headers = {'Content-Type' : 'application/json',
-                'X-chkp-sid' : f'{x}'} 
-    body = {}
-    api_post = requests.post(api_url, data=json.dumps(body), headers=headers, verify=False)
-    result = api_post.json()
-
-    sleeptime(1)
-    api_debug(defname, api_url, headers, body, result, api_post)
-
-    response = api_post.status_code
-    if response == 200: 
-        print(f'{response}... Logged out\n')
-    else: 
-        print(f'{response}... Logout failed\n')
-
-
-###List Gateways, Clusters, Cluster Members###
-def show_simple(config, body):
-
-    print(f"\n[ API : Generate {config} Object List : {domain}]\n")
-    defname = f"API : Show Simple {config} : {domain}"
+        end()
     
-    api_url = f'{url}/show-simple-{config}'
-    x = sid["sid"]
-    headers = {'Content-Type' : 'application/json',
-                'X-chkp-sid' : f'{x}'} 
+    return debug
 
-    api_post = requests.post(api_url, data=json.dumps(body), headers=headers, verify=False)
-    result = api_post.json()
 
-    sleeptime(1)
-    api_debug(defname, api_url, headers, body, result, api_post)
+# create scripts to run on mds
+def runcmd(cmd, script):
 
-    if config == 'gateways':
-        global gatewaylist
-        gatewaylist = [] 
-        for gw in result['objects']:
-            gatewaylist.append(gw['name'])
-        
-        print(f"[ API: GATEWAY LIST ]\n{gatewaylist}\n")
+    bash=f"""{shell} 
+{cpprofile} 
+{cmd} 
+"""
 
-    if config == 'clusters':
-        global clusterlist
-        clusterlist = [] 
-        for i in result['objects']:
-            clusterlist.append(i['name'])
-        print(f"[ API: CLUSTER OBJECT LIST ]\n{clusterlist}\n")
+    if debug == 1:
+        print(f'[ contents ]\n{bash}\n') 
+        print(f'[ script]\n{script}\n')
+        print('[[ Does everything look right? ]]\n')
+        pause_debug()
 
-    if config == 'cluster':
-        global memberlist
-        memberlist = [] 
-        for i in result['cluster-members']:
-            memberlist.append(i['name'])
-        # print(f"[ API: CLUSTER MEMBER LIST ]\n{memberlist}\n")
+    with open(script, 'w') as f: 
+        f.write(bash)
+
+    os.system(f"chmod +x {script}")
     
-
-
-def showtask(taskid): 
-
-    print(f"\n[ API: Show-Task : {taskid}]\n")
-    defname = f"API : Show-Task : {taskid}"
-    
-    api_url = f'{url}/show-task'
-    x = sid["sid"]
-    headers = {'Content-Type' : 'application/json',
-                'X-chkp-sid' : f'{x}'} 
-    body = {'task-id' : f'{taskid}', 'details-level' : 'full'}
-
-    api_post = requests.post(api_url, data=json.dumps(body), headers=headers, verify=False)
-    result = api_post.json()
-
-    sleeptime(1)
-    api_debug(defname, api_url, headers, body, result, api_post)
-
-    return result
-
-
-### Collect script from user ###
-def runscript(target): 
-
-    print(f"\n[ API: Run-Script : {target}]\n")
-    defname = f"API : Run-Script : {target}"
-    
-    api_url = f'{url}/run-script'
-    x = sid["sid"]
-    headers = {'Content-Type' : 'application/json',
-                'X-chkp-sid' : f'{x}'} 
-    body = {'script-name' : f'{defname}',
-    'script' : f'{cmd}',
-    'targets' : [ f'{target}' ] }
-
-    api_post = requests.post(api_url, data=json.dumps(body), headers=headers, verify=False)
-    result = api_post.json()
-
-    sleeptime(1)
-    api_debug(defname, api_url, headers, body, result, api_post)
-
-    answer = showtask(result['tasks'][0]['task-id'])
-    sleeptime(int(timeout))
-
+    global vallist
     try:
-        print(answer['tasks'][0]['task-details'][0]['statusDescription'])
+        vallist = subprocess.check_output(script, shell=True, text=True, timeout=30)
     except Exception as e:
-        print(f'Error: {e} \n')
-        pass
+        traceback.print_exc()
+        print(f"[runcmd] : Error : {e}")
+
+    if debug == 1: 
+        print(f"[ RESULT ]\n{vallist}\n\n")
+        os.system(f"rm -v {script}")
+    else:
+        os.system(f"rm {script}")
+    
+    return vallist
 
 
-def main():
+def domains():
+    
+    global domainlist
+    dmcmd = "mdsstat | grep -i cma | awk '{print $6}'"
+    script = f'{gwbin}/tmp_gw_bulk_domains_list.sh'
+    domainlist = runcmd(dmcmd, script).split()
+    print(f"[ DOMAIN LIST ]\n{domainlist}\n")
 
-    helpmenu()
 
+# generate list of all gateways
+def gateways(): 
+
+    try:
+        for domain in domainlist: 
+            print(f"[gateways] : queryDB_util : {domain}\n")
+            cmd = f'''mdsenv {domain}
+(echo {domain};  echo {username}; echo {password}; echo "-t network_objects -s class='cluster_member'|type='gateway_ckp'|type='cluster_member' -a -pf"; echo "-q") | queryDB_util | grep -E "^\s\s\s\sipaddr" | grep -v ipaddr6 | sed 's/    ipaddr: //g' 
+'''
+            script = f'{gwbin}/tmp_gateways_{domain}_tmp.sh'
+            gwlist = runcmd(cmd, script).split()
+
+            inventory[domain] = []
+            for i in gwlist: 
+                inventory[domain].append(i)
+    except Exception as e: 
+        traceback.print_exc()
+        print(f"[gateways] : Error {e}\n")
+
+    print(f"[gateways] : Gateway List Complete")
+
+
+def testconn(ip, port, tmout): 
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(tmout)
+    result = sock.connect_ex((ip,int(port)))
+    return result
+
+
+def output(): 
+    
+    count = 0
+    fcount = 0
+    ecount = 0
+    try:
+        for domain in inventory.keys():
+            for gwip in inventory[domain]:
+                if testconn(gwip, 18208, 3) != 0:
+                    fcount += 1
+                    print(f"[testconn] : Check connectivity : {gwip}:18208 : Count {fcount}\n")
+                    failures[gwip] = f"No connectivity on port 18208, Count {fcount}"
+                else:
+                    count += 1
+                    print(f"[output] : {command} : {domain} | {gwip} : Count {count}\n")
+                    # segfault (null buff) from os causes subprocess to fail
+                    # and causes the entire script to exit, try/except does not work
+                    # needs 'exit 0' at end of bash script
+                    cmd = f'''mdsenv {domain}
+cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{command}"
+exit 0'''
+                    script = f'{gwbin}/tmp_info_gw-{gwip}_tmp.sh'
+                    results = runcmd(cmd, script)
+                    
+                    if len(results) < 1: 
+                        ecount += 1
+                        print(f"[output] : Output Empty : {gwip} : Count {ecount}\n")
+                        failures[gwip] = f"Empty List {ecount}"
+                        stdout[gwip] = ''
+                    else:
+                        stdout[gwip] = results
+
+    except Exception as e:
+        traceback.print_exc()
+        print(f"[output] : Error : {e}\n")
+
+    try:
+        for key,value in stdout.items():
+            if len(value) != 0:
+                verified[key] = True
+            else:
+                verified[key] = False
+                
+    except Exception as e:
+        traceback.print_exc()
+        print(f"[output] : Error : {e}\n")
+
+
+def cleanup():
+    # remove undeleted tmp scripts
+    os.system(f"rm -v {gwbin}/*")
+
+
+def main(): 
+    
+    # run debug mode or not
+    global debug
+    if len(sys.argv) > 1: 
+        helpmenu()
+    else:
+        debug = 0
+    
+    # get user configuration 
     askConfig()
-    makedir()
+    
+    # create direcotry 
+    mkdir() 
+    
+    # domains list 
+    domains()
+    
+    # get list of domains and gateways
+    gateways()
 
-    global url
-    url = f'https://{api_ip}:{api_port}/web_api'
-
-    global sid 
-    sid = login()
-
-    # get gateways and cluster lists from domain / API
-    show_simple('gateways', body = {'details-level' : 'full'})
-    show_simple('clusters', body = {'details-level' : 'full'})
-
-    global completemembers
-    completemembers = [] 
-
-    for c in clusterlist:
-        show_simple('cluster', body = {'name' : f'{c}', 'details-level' : 'full'})
-        completemembers.append(memberlist)
-    print(f"[ API: COMPLETE MEMBER LIST ]\n{completemembers}\n")
+    # get output
+    output()
     
 
-    completemembers.append(gatewaylist)
-    makeonelist = []
-    for t in completemembers:
-        for x in t:
-            makeonelist.append(x)
-    print(f"[ API: FINISHED TARGET LIST ]\n{makeonelist}\n")
 
-    global cmd
-    cmd = question("Paste entire command below to run on gateways")
-
-    global timeout
-    timeout = question("DEPENDING ON COMMANDS/ENVIRONMENTS, larger timeout is required (5 or 10 or 15)\nEnter timeout")
-
-    for m in makeonelist:
-        runscript(m)
-
-
-if __name__=="__main__":
+if __name__ == "__main__": 
+    
     try:
+        #time start
+        starttime = time.time()
         main()
     except Exception as e:
-        print(f"[ Error ]\n{e}\n")
+        traceback.print_exc()
+        print(f"[main] : Error : {e}\n")
     finally:
+        #record failures 
+        with open('gw_failures.json', 'w') as f:
+            f.write(json.dumps(failures, indent=4, sort_keys=False))
+        
+        mapping = {}
+
+        try:
+            for vgw in verified.keys(): 
+                for key,value in inventory.items(): 
+                    if vgw in value: 
+                        mapping[vgw] = [key] 
+        except Exception as e:
+            print(f"Error {e}\n")     
+        
+        print("\n\n[ No Output or CPRID issue ]\n\n")
+        for key,value in verified.items():
+            if value == False: 
+                print(f"Gateway {key} : Domain {mapping[key]}")
+        
+        fconnect = {}
+        print("\n\n[ Failed to connect to Gateway. ]\n\n")
+        try:
+            for fail,reason in failures.items():
+                if 'connectivity' in reason:
+                    for key,value in inventory.items(): 
+                        if fail in value:
+                            print(f"Gateway {fail} : Domain {key}")
+        except Exception as e:
+            print(f"Error {e}\n")
+        
+        
+        # domain -> gateways 
+        with open(f'{gwout}/gw_inventory.json', 'w') as f:
+            f.write(json.dumps(inventory, indent=4, sort_keys=False))
+        
+        # gateway -> domain
+        with open(f'{gwout}/gw_mapping.json', 'w') as f:
+            f.write(json.dumps(mapping, indent=4, sort_keys=False))        
+        
+        # output successful
+        with open(f'{gwout}/gw_successful.json', 'w') as f:
+            f.write(json.dumps(verified, indent=4, sort_keys=False))
+        
+        # gateway -> output
+        with open(f'{gwout}/gw_stdout.json', 'w') as f:
+            f.write(json.dumps(stdout, indent=4, sort_keys=False))  
+            
+        with open(f'{gwout}/gw_stdout.json', encoding='utf-8') as f:
+            df = pd.read_json(f)
+        
+        df.to_csv(logfile, encoding='utf-8', index=False)
+
+        #end time
+        endtime = time.time()
+        totaltime = endtime - starttime
+        print(f"\n Total Run Time : {totaltime} seconds")
+        
+        # remove leftover files
+        cleanup() 
+    
         end()
+
