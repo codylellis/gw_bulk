@@ -6,7 +6,6 @@ import sys
 import json
 import socket
 import time
-import pandas as pd 
 
 #Global Variables
 global shell
@@ -331,11 +330,6 @@ if __name__ == "__main__":
         # gateway -> output
         with open(f'{gwout}/gw_stdout.json', 'w') as f:
             f.write(json.dumps(stdout, indent=4, sort_keys=False))  
-            
-        with open(f'{gwout}/gw_stdout.json', encoding='utf-8') as f:
-            df = pd.read_json(f)
-        
-        df.to_csv(logfile, encoding='utf-8', index=False)
 
         #end time
         endtime = time.time()
