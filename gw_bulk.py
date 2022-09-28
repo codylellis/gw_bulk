@@ -140,19 +140,19 @@ def runcmd(cmd, script):
     os.system(f"chmod +x {script}")
     
     try:
-        result = subprocess.check_output(script, shell=True, text=True, timeout=30)
+        cmdout = subprocess.check_output(script, shell=True, text=True, timeout=30)
     except Exception as e:
         traceback.print_exc()
         print(f"[runcmd] : Error : {e}")
 
     if debug == 1: 
-        print(f"[ runcmd ]\n{result}\n\n")
+        print(f"[ runcmd ]\n{cmdout}\n\n")
         pause_debug()
         os.system(f"rm -v {script}")
     else:
         os.system(f"rm {script}")
     
-    return result
+    return cmdout
 
 
 def domains():
@@ -218,11 +218,15 @@ exit 0'''
                     script = f'{gwbin}/tmp_info_gw-{gwip}_tmp.sh'
                     result = runcmd(cmd, script)
                     
-                    if len(result) < 5: 
+                    if len(result) == 0:
                         ecount += 1
                         print(f"[output] : Output Empty : {gwip} : Count {ecount}\n")
-                        failures[gwip] = f"Empty List {ecount}"
+                        failures[gwip] = f"Empty Output {ecount}"
                         stdout[gwip] = ''
+                    elif 'NULL' in result:
+                        ecount += 1
+                        print(f"[output] : (NULL BUF) : {gwip} : Count {ecount}\n")
+                        failures[gwip] = f"(NULL BUF) {ecount}"
                     else:
                         stdout[gwip] = result.strip()
 
@@ -295,8 +299,8 @@ if __name__ == "__main__":
             print(f"Error {e}\n")     
         
         print("\n\n[ No Output or CPRID issue ]\n\n")
-        for key,value in verified.items():
-            if value == "False": 
+        for key,value in failures.items():
+            if 'NULL' in value:
                 print(f"Gateway {key} : Domain {mapping[key]}")
         
         fconnect = {}
@@ -320,7 +324,7 @@ if __name__ == "__main__":
             f.write(json.dumps(mapping, indent=4, sort_keys=False))        
         
         # output successful
-        with open(f'{gwout}/gw_successful.json', 'w') as f:
+        with open(f'{gwout}/gw_verified.json', 'w') as f:
             f.write(json.dumps(verified, indent=4, sort_keys=False))
             
         #record failures 
