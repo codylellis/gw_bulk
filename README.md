@@ -6,8 +6,9 @@ Only runs on MDM.
 
 [ To Run ] 
 
+```python
 # python3 script.py 
-
+```
 
 [ Instructions ] 
 
