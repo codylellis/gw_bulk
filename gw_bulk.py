@@ -6,7 +6,7 @@ import sys
 import json
 import socket
 import time
-import csv 
+import csv
 
 ###Global Variables###
 # bash scripting
@@ -33,6 +33,8 @@ gwout = f'{gwpath}/output'
 # dictionaries 
 global mapping
 mapping = {}
+global gmap 
+gmap = {}
 global failures
 failures = {}
 global inventory 
@@ -41,7 +43,7 @@ global stdout
 stdout = {}
 # connectivity timeout
 global tmout 
-tmout = 2
+tmout = 5
 
 ###Debugging Functions###
 # pause script, take any input to continue 
@@ -99,27 +101,55 @@ def mkdir():
 def helpmenu():
 
     if len(sys.argv) > 1 and sys.argv[1] == "-h": 
-        print(
-            '''
-            [ Help Menu ]
+        print('''[ Help Menu ]
+
+Support: 
+cellis@checkpoint.com
+
+Usage: 
+./gw_bulk_v2.py OPTIONS
+
+Options:
+-d = Enable Debug (debug = 1)
+-h = Help Menu
+
+Notes: 
+CPRID (NULL BUF) troubleshooting sk174346
+
+Scope: 
+For MDM only. 
             
-            Support: 
-            cellis@checkpoint.com
-            
-            Usage: 
-            ./gw_bulk_v2.py OPTIONS
-            
-            Options:
-            -d = Enable Debug (debug = 1)
-            -h = Help Menu
-            
-            Notes: 
-            CPRID (NULL BUF) troubleshooting sk174346
-            
-            Scope: 
-            For MDM only. 
-            '''
-        )
+
+[ Description ]
+
+Execute commands across all gateways on MDM.Only runs on MDM.
+
+
+[ Instructions ]
+
+1: Provide Username and Password of MDM administrator as well as command to run on all gateways.
+
+2: /var/log/gw_bulk - main output directory
+
+3: /var/log/gw_bulk/output/
+
+gw_stdout.json - main output file
+
+gw_inventory.json - all domains -> all managed gateways
+
+gw_mapping.json - responsive gateway -> managed domain
+
+gw_failures.json - connectivity failures, CPRID version issues
+
+
+[ Performance ]
+
+Takes about 20 minutes to run 'uptime' on 300+ gateways
+
+
+[ Troubleshooting ]
+
+(NULL BUF) = CPRID version issue or general CPRID error (sk174346)''')
         quit() 
     elif len(sys.argv) > 1 and sys.argv[1] == "-d":
         print('\n[ Debug Mode Enabled ]\n') 
@@ -281,15 +311,18 @@ def writefiles():
 
 def report(): 
     
+    # reverse lookup of inventory for gateways with cprid issues 
     print("\n\n[ No Output or CPRID issue ]\n\n")
     try:
-        for key,value in failures.items():
-            if 'NULL' in value:
-                print(f"Gateway {key} : Domain {mapping[key]}")
+        for fail,reason in failures.items():
+            if 'NULL' in reason or 'Empty' in reason:
+                for key,value in inventory.items():
+                    if fail in value:
+                        print(f"Gateway {fail} : Domain {key}")
     except Exception as e:
-        print(f"Error {e}\n")
+        print(f"[ report ] : Error {e}\n")
     
-    
+    # reverse lookup of inventory for gateways with connection issues
     print("\n\n[ Failed to connect to Gateway. ]\n\n")
     try:
         for fail,reason in failures.items():
@@ -298,7 +331,7 @@ def report():
                     if fail in value:
                         print(f"Gateway {fail} : Domain {key}")
     except Exception as e:
-        print(f"Error {e}\n")
+        print(f"[ report ] : Error {e}\n")
     
     #end time
     endtime = time.time()
@@ -334,7 +367,6 @@ def main():
 
     # send command and gather output
     output()
-    
 
 
 if __name__ == "__main__": 
