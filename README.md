@@ -6,11 +6,12 @@ Execute commands across all gateways on MDM.
 Only runs on MDM. 
 ```
 
+```
 [ To Run ] 
 
-```bash
 # python3 script.py 
 ```
+
 ```
 [ Instructions ] 
 
