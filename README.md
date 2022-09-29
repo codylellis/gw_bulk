@@ -1,15 +1,17 @@
+```
 [ Description ] 
 
 Execute commands across all gateways on MDM.  
 
 Only runs on MDM. 
+```
 
 [ To Run ] 
 
-```python
+```bash
 # python3 script.py 
 ```
-
+```
 [ Instructions ] 
 
 1. Provide Username and Password of MDM administrator as well as command to run on all gateways. 
@@ -29,13 +31,14 @@ gw_mapping.json - responsive gateway -> managed domain
 gw_failures.json - connectivity failures, CPRID version issues 
 
 gw_successful.json - output exists from responsive gateway
-
-
+```
+```
 [ Performance ] 
 
 Takes about 20 minutes to run 'uptime' on 300+ gateways
-
-
+```
+```
 [ Troubleshooting ] 
 
 (NULL BUF) = CPRID version issue or general CPRID error (sk174346)
+```
