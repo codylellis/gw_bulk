@@ -1,9 +1,7 @@
 ```
 [ Description ] 
 
-Execute commands across all gateways on MDM.  
-
-Only runs on MDM. 
+Execute commands across all gateways on MDM (gw_bulk_mdm.py) or SMS (gw_bulk_sms.py)
 ```
 
 ```
