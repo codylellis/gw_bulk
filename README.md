@@ -4,6 +4,10 @@ Execute commands across all gateways on MDM.
 
 Only runs on MDM. 
 
+[ To Run ] 
+
+# python3 script.py 
+
 
 [ Instructions ] 
 
