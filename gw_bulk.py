@@ -8,7 +8,8 @@ import socket
 import time
 import csv 
 
-#Global Variables
+###Global Variables###
+# bash scripting
 global shell
 shell = '#!/bin/bash'
 global cpprofile
@@ -18,30 +19,36 @@ source $MDSDIR/scripts/MDSprofile.sh
 source $MDS_SYSTEM/shared/mds_environment_utils.sh
 source $MDS_SYSTEM/shared/sh_utilities.sh
 '''
+# timestamp 
 global now
 nowtmp = datetime.now()
 now = nowtmp.strftime("%m-%d-%y_%H-%M-%S")
+# filepaths
 global gwpath
 gwpath = '/var/log/gw_bulk'
 global gwbin
 gwbin = f'{gwpath}/scripts'
 global gwout
 gwout = f'{gwpath}/output'
+# dictionaries 
+global mapping
+mapping = {}
 global failures
 failures = {}
-global verified
-verified = {}
 global inventory 
 inventory = {} 
 global stdout
 stdout = {}
+# connectivity timeout
+global tmout 
+tmout = 2
 
 ###Debugging Functions###
-# take any input to pause debug 
+# pause script, take any input to continue 
 def pause_debug():
     input("[ DEBUG ] Press any key to continue...\n\n")   
 
-
+# script exit 
 def end(): 
     sys.exit(0)
 
@@ -52,7 +59,6 @@ def question(stuff):
         if len(answer) != 0:
             False
             return answer 
-
 
 # ask user for configuration 
 def askConfig():
@@ -88,7 +94,6 @@ def mkdir():
         os.system(f'mkdir -v {gwpath}')
         os.system(f'mkdir -v {gwbin}')
         os.system(f'mkdir -v {gwout}')
-    
 
 #help menu
 def helpmenu():
@@ -98,6 +103,9 @@ def helpmenu():
             '''
             [ Help Menu ]
             
+            Support: 
+            cellis@checkpoint.com
+            
             Usage: 
             ./gw_bulk_v2.py OPTIONS
             
@@ -106,7 +114,10 @@ def helpmenu():
             -h = Help Menu
             
             Notes: 
-            Coming soon... 
+            CPRID (NULL BUF) troubleshooting sk174346
+            
+            Scope: 
+            For MDM only. 
             '''
         )
         quit() 
@@ -119,8 +130,7 @@ def helpmenu():
     
     return debug
 
-
-# create scripts to run on mds
+# create bash scripts to run against mds
 def runcmd(cmd, script):
 
     bash=f"""{shell} 
@@ -154,17 +164,17 @@ def runcmd(cmd, script):
     
     return cmdout
 
-
+# make list of CMA IP's 
 def domains():
     
     global domainlist
     dmcmd = "mdsstat | grep -i cma | awk '{print $6}'"
     script = f'{gwbin}/tmp_gw_bulk_domains_list.sh'
     domainlist = runcmd(dmcmd, script).split()
-    print(f"[ DOMAIN LIST ]\n{domainlist}\n")
+    if debug == 1:
+        print(f"[ DOMAIN LIST ]\n{domainlist}\n")
 
-
-# generate list of all gateways
+# generate list of gateways per CMA
 def gateways(): 
 
     try:
@@ -179,6 +189,7 @@ def gateways():
             inventory[domain] = []
             for i in gwlist: 
                 inventory[domain].append(i)
+                
     except Exception as e: 
         traceback.print_exc()
         print(f"[gateways] : Error {e}\n")
@@ -197,36 +208,35 @@ def testconn(ip, port, tmout):
 def output(): 
     
     count = 0
-    fcount = 0
-    ecount = 0
+    failcount = 0
+    errorcount = 0
     try:
         for domain in inventory.keys():
             for gwip in inventory[domain]:
-                if testconn(gwip, 18208, 3) != 0:
-                    fcount += 1
-                    print(f"[testconn] : Check connectivity : {gwip}:18208 : Count {fcount}\n")
-                    failures[gwip] = f"No connectivity on port 18208, Count {fcount}"
+                if testconn(gwip, 18208, tmout) != 0:
+                    failcount += 1
+                    print(f"[testconn] : Check connectivity : {gwip}:18208 : Count {failcount}\n")
+                    failures[gwip] = f"No connectivity on port 18208, Count {failcount}"
                 else:
                     count += 1
                     print(f"[output] : {command} : {domain} | {gwip} : Count {count}\n")
                     # segfault (null buff) from os causes subprocess to fail
                     # and causes the entire script to exit, try/except does not work
-                    # needs 'exit 0' at end of bash script
+                    # requires 'exit 0' at end of bash script
                     cmd = f'''mdsenv {domain}
 cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{command}"
 exit 0'''
-                    script = f'{gwbin}/tmp_info_gw-{gwip}_tmp.sh'
+                    script = f'{gwbin}/tmp_bash_gw-{gwip}_tmp.sh'
                     result = runcmd(cmd, script)
                     
                     if len(result) == 0:
-                        ecount += 1
-                        print(f"[output] : Output Empty : {gwip} : Count {ecount}\n")
-                        failures[gwip] = f"Empty Output {ecount}"
-                        stdout[gwip] = ''
+                        errorcount += 1
+                        print(f"[output] : Output Empty : {gwip} : Count {errorcount}\n")
+                        failures[gwip] = f"Empty Output {errorcount}"
                     elif 'NULL' in result:
-                        ecount += 1
-                        print(f"[output] : (NULL BUF) : {gwip} : Count {ecount}\n")
-                        failures[gwip] = f"(NULL BUF) {ecount}"
+                        errorcount += 1
+                        print(f"[output] : (NULL BUF) : {gwip} : Count {errorcount}\n")
+                        failures[gwip] = f"CPRID Error : (NULL BUF) : Count {errorcount}"
                     else:
                         stdout[gwip] = result.strip()
 
@@ -234,16 +244,66 @@ exit 0'''
         traceback.print_exc()
         print(f"[output] : Error : {e}\n")
 
+
+def writefiles():
+
+    # creating mapping of gateway to domain for later use
     try:
-        for key,value in stdout.items():
-            if len(value) != 0:
-                verified[key] = "True"
-            else:
-                verified[key] = "False"
-                
+        for gw in stdout.keys(): 
+            for key,value in inventory.items(): 
+                if gw in value: 
+                    mapping[gw] = [key] 
     except Exception as e:
-        traceback.print_exc()
-        print(f"[output] : Error : {e}\n")
+        print(f"Error {e}\n")
+    
+    # domain -> gateways 
+    with open(f'{gwout}/gw_inventory.json', 'w') as f:
+        f.write(json.dumps(inventory, indent=4, sort_keys=False))
+    
+    # gateway -> domain
+    with open(f'{gwout}/gw_mapping.json', 'w') as f:
+        f.write(json.dumps(mapping, indent=4, sort_keys=False))        
+        
+    #record failures 
+    with open(f'{gwout}/gw_failures.json', 'w') as f:
+        f.write(json.dumps(failures, indent=4, sort_keys=False))
+    
+    # gateway command output
+    with open(f'{gwout}/gw_stdout.json', 'w') as f:
+        f.write(json.dumps(stdout, indent=4, sort_keys=False))  
+    
+    # make csv of stdout information 
+    fcsv = f'{gwout}/gw_stdout.csv'
+    with open(fcsv, 'w') as f:
+        w = csv.writer(f)
+        w.writerows(stdout.items())
+
+
+def report(): 
+    
+    print("\n\n[ No Output or CPRID issue ]\n\n")
+    try:
+        for key,value in failures.items():
+            if 'NULL' in value:
+                print(f"Gateway {key} : Domain {mapping[key]}")
+    except Exception as e:
+        print(f"Error {e}\n")
+    
+    
+    print("\n\n[ Failed to connect to Gateway. ]\n\n")
+    try:
+        for fail,reason in failures.items():
+            if 'connectivity' in reason:
+                for key,value in inventory.items(): 
+                    if fail in value:
+                        print(f"Gateway {fail} : Domain {key}")
+    except Exception as e:
+        print(f"Error {e}\n")
+    
+    #end time
+    endtime = time.time()
+    totaltime = endtime - starttime
+    print(f"\n Total Run Time : {totaltime} seconds")
 
 
 def cleanup():
@@ -253,7 +313,7 @@ def cleanup():
 
 def main(): 
     
-    # run debug mode or not
+    # enable debug mode or not
     global debug
     if len(sys.argv) > 1: 
         helpmenu()
@@ -263,16 +323,16 @@ def main():
     # get user configuration 
     askConfig()
     
-    # create direcotry 
+    # create direcotries
     mkdir() 
     
-    # domains list 
+    # get domains list 
     domains()
     
-    # get list of domains and gateways
+    # get list of gateways from domains
     gateways()
 
-    # get output
+    # send command and gather output
     output()
     
 
@@ -284,70 +344,11 @@ if __name__ == "__main__":
         starttime = time.time()
         main()
     except Exception as e:
-        traceback.print_exc()
         print(f"[main] : Error : {e}\n")
+        traceback.print_exc()
     finally:
-        
-        mapping = {}
-
-        try:
-            for vgw in verified.keys(): 
-                for key,value in inventory.items(): 
-                    if vgw in value: 
-                        mapping[vgw] = [key] 
-        except Exception as e:
-            print(f"Error {e}\n")     
-        
-        print("\n\n[ No Output or CPRID issue ]\n\n")
-        for key,value in failures.items():
-            if 'NULL' in value:
-                print(f"Gateway {key} : Domain {mapping[key]}")
-        
-        fconnect = {}
-        print("\n\n[ Failed to connect to Gateway. ]\n\n")
-        try:
-            for fail,reason in failures.items():
-                if 'connectivity' in reason:
-                    for key,value in inventory.items(): 
-                        if fail in value:
-                            print(f"Gateway {fail} : Domain {key}")
-        except Exception as e:
-            print(f"Error {e}\n")
-        
-        
-        # domain -> gateways 
-        with open(f'{gwout}/gw_inventory.json', 'w') as f:
-            f.write(json.dumps(inventory, indent=4, sort_keys=False))
-        
-        # gateway -> domain
-        with open(f'{gwout}/gw_mapping.json', 'w') as f:
-            f.write(json.dumps(mapping, indent=4, sort_keys=False))        
-        
-        # output successful
-        with open(f'{gwout}/gw_verified.json', 'w') as f:
-            f.write(json.dumps(verified, indent=4, sort_keys=False))
-            
-        #record failures 
-        with open(f'{gwout}/gw_failures.json', 'w') as f:
-            f.write(json.dumps(failures, indent=4, sort_keys=False))
-        
-        # gateway -> output
-        with open(f'{gwout}/gw_stdout.json', 'w') as f:
-            f.write(json.dumps(stdout, indent=4, sort_keys=False))  
-            
-        fcsv = f'{gwout}/gw_stdout.csv'
-        with open(fcsv, 'w') as f:
-            w = csv.writer(f)
-            w.writerows(stdout.items())
-
-
-        #end time
-        endtime = time.time()
-        totaltime = endtime - starttime
-        print(f"\n Total Run Time : {totaltime} seconds")
-        
-        # remove leftover files
+        writefiles()
+        report()
         cleanup() 
-    
         end()
 
