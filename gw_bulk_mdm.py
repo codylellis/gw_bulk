@@ -7,6 +7,7 @@ import json
 import socket
 import time
 import csv
+import logging
 
 ###Global Variables###
 # bash scripting
@@ -25,7 +26,7 @@ nowtmp = datetime.now()
 now = nowtmp.strftime("%m-%d-%y_%H-%M-%S")
 # filepaths
 global gwpath
-gwpath = '/var/log/gw_bulk'
+gwpath = '/home/admin/elco1001/gw_bulk'
 global gwbin
 gwbin = f'{gwpath}/scripts'
 global gwout
@@ -44,6 +45,26 @@ stdout = {}
 # connectivity timeout
 global tmout 
 tmout = 5
+
+
+logging.basicConfig(level=logging.DEBUG,
+            format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
+            datefmt='%a, %d %b %Y %H:%M:%S',
+            filename=f"{gwpath}/log.log",
+            filemode='w')
+
+class Log:
+    @classmethod
+    def debug(cls, msg):
+        logging.debug(msg)
+
+    @classmethod
+    def info(cls, msg):
+        logging.info(msg)
+
+    @classmethod
+    def error(cls, msg):
+        logging.error(msg)
 
 ###Debugging Functions###
 # pause script, take any input to continue 
@@ -67,14 +88,16 @@ def askConfig():
 
     print("\n[ Provide Configuration ]\n")
 
-    global username, password, command
+    global username, password, targetdomain, command
 
     username = question("Username")
     password = question("Password")
+    targetdomain = question("'All' Domains or IP of specific Domain")
     command = question("Command to run on all gateways")
 
     formatanswer = f"""username = {username}
 password = {password}
+domain = {targetdomain}
 command = {command}
 """  
 
@@ -87,12 +110,12 @@ command = {command}
 # make log directory / clear old log files
 def mkdir():
 
-    print(f'[ mkdir | {gwpath} | {gwbin} | {gwout}]\n')
+    Log.info(f'[ mkdir | {gwpath} | {gwbin} | {gwout}]\n')
 
     if os.path.isdir(gwpath) and os.path.isdir(gwbin) and os.path.isdir(gwout):
-        print(f'... Exists!\n')
+        Log.info(f'... Exists!\n')
     else:
-        print(f'... Does not exist\n')
+        Log.info(f'... Does not exist\n')
         os.system(f'mkdir -v {gwpath}')
         os.system(f'mkdir -v {gwbin}')
         os.system(f'mkdir -v {gwout}')
@@ -152,7 +175,7 @@ Takes about 20 minutes to run 'uptime' on 300+ gateways
 (NULL BUF) = CPRID version issue or general CPRID error (sk174346)''')
         quit() 
     elif len(sys.argv) > 1 and sys.argv[1] == "-d":
-        print('\n[ Debug Mode Enabled ]\n') 
+        Log.debug('\n[ Debug Mode Enabled ]\n') 
         global debug
         debug = 1
     else: 
@@ -188,9 +211,6 @@ def runcmd(cmd, script):
     if debug == 1: 
         print(f"[ runcmd ]\n{cmdout}\n\n")
         pause_debug()
-        os.system(f"rm -v {script}")
-    else:
-        os.system(f"rm {script}")
     
     return cmdout
 
@@ -198,18 +218,22 @@ def runcmd(cmd, script):
 def domains():
     
     global domainlist
-    dmcmd = "mdsstat | grep -i cma | awk '{print $6}'"
-    script = f'{gwbin}/tmp_gw_bulk_domains_list.sh'
-    domainlist = runcmd(dmcmd, script).split()
-    if debug == 1:
-        print(f"[ DOMAIN LIST ]\n{domainlist}\n")
+    
+    if targetdomain == 'all': 
+        dmcmd = "mdsstat | grep -i cma | awk '{print $6}'"
+        script = f'{gwbin}/tmp_gw_bulk_domains_list.sh'
+        domainlist = runcmd(dmcmd, script).split()
+        if debug == 1:
+            Log.info(f"[ DOMAIN LIST ]\n{domainlist}\n")
+    else: 
+        domainlist = [targetdomain]
 
 # generate list of gateways per CMA
 def gateways(): 
 
     try:
         for domain in domainlist: 
-            print(f"[gateways] : queryDB_util : {domain}\n")
+            Log.info(f"[gateways] : queryDB_util : {domain}\n")
             cmd = f'''mdsenv {domain}
 (echo {domain};  echo {username}; echo {password}; echo "-t network_objects -s class='cluster_member'|type='gateway_ckp'|type='cluster_member' -a -pf"; echo "-q") | queryDB_util | grep -E "^\s\s\s\sipaddr" | grep -v ipaddr6 | sed 's/    ipaddr: //g' 
 '''
@@ -221,10 +245,10 @@ def gateways():
                 inventory[domain].append(i)
                 
     except Exception as e: 
-        traceback.print_exc()
-        print(f"[gateways] : Error {e}\n")
+        Log.error(traceback.print_exc())
+        Log.error(f"[gateways] : Error {e}\n")
 
-    print(f"[gateways] : Gateway List Complete")
+    Log.info(f"[gateways] : Gateway List Complete")
 
 
 def testconn(ip, port, tmout): 
@@ -245,11 +269,11 @@ def output():
             for gwip in inventory[domain]:
                 if testconn(gwip, 18208, tmout) != 0:
                     failcount += 1
-                    print(f"[testconn] : Check connectivity : {gwip}:18208 : Count {failcount}\n")
+                    Log.info(f"[testconn] : Check connectivity : {gwip}:18208 : Count {failcount}\n")
                     failures[gwip] = f"No connectivity on port 18208, Count {failcount}"
                 else:
                     count += 1
-                    print(f"[output] : {command} : {domain} | {gwip} : Count {count}\n")
+                    Log.info(f"[output] : {command} : {domain} | {gwip} : Count {count}\n")
                     # segfault (null buff) from os causes subprocess to fail
                     # and causes the entire script to exit, try/except does not work
                     # requires 'exit 0' at end of bash script
@@ -261,18 +285,18 @@ exit 0'''
                     
                     if len(result) == 0:
                         errorcount += 1
-                        print(f"[output] : Output Empty : {gwip} : Count {errorcount}\n")
+                        Log.info(f"[output] : Output Empty : {gwip} : Count {errorcount}\n")
                         failures[gwip] = f"Empty Output {errorcount}"
                     elif 'NULL' in result:
                         errorcount += 1
-                        print(f"[output] : (NULL BUF) : {gwip} : Count {errorcount}\n")
+                        Log.info(f"[output] : (NULL BUF) : {gwip} : Count {errorcount}\n")
                         failures[gwip] = f"CPRID Error : (NULL BUF) : Count {errorcount}"
                     else:
                         stdout[gwip] = result.strip()
 
     except Exception as e:
-        traceback.print_exc()
-        print(f"[output] : Error : {e}\n")
+        Log.error(traceback.print_exc())
+        Log.error(f"[output] : Error : {e}\n")
 
 
 def writefiles():
@@ -284,17 +308,17 @@ def writefiles():
                 if gw in value: 
                     mapping[gw] = [key] 
     except Exception as e:
-        print(f"Error {e}\n")
+        Log.error(f"Error {e}\n")
     
-    # domain -> gateways 
+    # domain -> gateways (all gateways)
     with open(f'{gwout}/gw_inventory.json', 'w') as f:
         f.write(json.dumps(inventory, indent=4, sort_keys=False))
     
-    # gateway -> domain
+    # gateway -> domain (succsessful gateways)
     with open(f'{gwout}/gw_mapping.json', 'w') as f:
         f.write(json.dumps(mapping, indent=4, sort_keys=False))        
         
-    #record failures 
+    #gateway fail reason (failed gateways)
     with open(f'{gwout}/gw_failures.json', 'w') as f:
         f.write(json.dumps(failures, indent=4, sort_keys=False))
     
@@ -312,31 +336,31 @@ def writefiles():
 def report(): 
     
     # reverse lookup of inventory for gateways with cprid issues 
-    print("\n\n[ No Output or CPRID issue ]\n\n")
+    Log.info("\n\n[ No Output or CPRID issue ]\n\n")
     try:
         for fail,reason in failures.items():
             if 'NULL' in reason or 'Empty' in reason:
                 for key,value in inventory.items():
                     if fail in value:
-                        print(f"Gateway {fail} : Domain {key}")
+                        Log.info(f"Gateway {fail} : Domain {key}")
     except Exception as e:
-        print(f"[ report ] : Error {e}\n")
+        Log.error(f"[ report ] : Error {e}\n")
     
     # reverse lookup of inventory for gateways with connection issues
-    print("\n\n[ Failed to connect to Gateway. ]\n\n")
+    Log.info("\n\n[ Failed to connect to Gateway. ]\n\n")
     try:
         for fail,reason in failures.items():
             if 'connectivity' in reason:
                 for key,value in inventory.items(): 
                     if fail in value:
-                        print(f"Gateway {fail} : Domain {key}")
+                        Log.info(f"Gateway {fail} : Domain {key}")
     except Exception as e:
-        print(f"[ report ] : Error {e}\n")
+        Log.error(f"[ report ] : Error {e}\n")
     
     #end time
     endtime = time.time()
     totaltime = endtime - starttime
-    print(f"\n Total Run Time : {totaltime} seconds")
+    Log.info(f"\n Total Run Time : {totaltime} seconds")
 
 
 def cleanup():
@@ -374,13 +398,14 @@ if __name__ == "__main__":
     try:
         #time start
         starttime = time.time()
+        Log.info(f"Start Time: {starttime}")
+        cleanup() 
         main()
     except Exception as e:
-        print(f"[main] : Error : {e}\n")
-        traceback.print_exc()
+        Log.error(f"[main] : Error : {e}\n")
+        Log.error(traceback.print_exc())
     finally:
         writefiles()
         report()
-        cleanup() 
         end()
 
