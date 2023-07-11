@@ -233,22 +233,26 @@ def gateways():
 
     try:
         for domain in domainlist: 
-            Log.info(f"[gateways] : queryDB_util : {domain}\n")
-            cmd = f'''mdsenv {domain}
-(echo {domain};  echo {username}; echo {password}; echo "-t network_objects -s class='cluster_member'|type='gateway_ckp'|type='cluster_member' -a -pf"; echo "-q") | queryDB_util | grep -E "^\s\s\s\sipaddr" | grep -v ipaddr6 | sed 's/    ipaddr: //g' 
-'''
-            script = f'{gwbin}/tmp_gateways_{domain}_tmp.sh'
-            gwlist = runcmd(cmd, script).split()
-
             inventory[domain] = []
-            for i in gwlist: 
-                inventory[domain].append(i)
+            Log.info(f"[gateways] : queryDB_util : {domain}\n")
+            cmdlist =[
+f'''mdsenv {domain}
+(echo {domain};  echo {username}; echo {password}; echo "-t network_objects -s class='cluster_member'|type='gateway_ckp'|type='cluster_member' -a -pf"; echo "-q") | queryDB_util | grep -E "^\s\s\s\sipaddr" | grep -v ipaddr6 | sed 's/    ipaddr: //g' 
+''',
+f'''mdsenv {domain}
+(echo {domain};  echo {username}; echo {password}; echo "-t network_objects -s class='gateway_ckp'&location='internal' -a -pf"; echo "-q") | queryDB_util | grep -E "^\s\s\s\sipaddr" | grep -v ipaddr6 | sed 's/    ipaddr: //g' | grep -v 'ipaddr_from_mac:' 
+''' ]       
+            count = 0
+            for cmd in cmdlist: 
+                count += 1
+                script = f'{gwbin}/tmp_gateways_{count}_{domain}_tmp.sh'
+                gwlist = runcmd(cmd, script).split()
+                for i in gwlist: 
+                    inventory[domain].append(i)
                 
     except Exception as e: 
         Log.error(traceback.print_exc())
         Log.error(f"[gateways] : Error {e}\n")
-
-    Log.info(f"[gateways] : Gateway List Complete")
 
 
 def testconn(ip, port, tmout): 
