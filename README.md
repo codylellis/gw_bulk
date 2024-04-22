@@ -1,16 +1,23 @@
 # gw_bulk
+
 Configure many, many Check Point firewalls
 
 # Scope
+
 Check Point Software, Multi-Domain and Standalone Management
 
 # Instructions
 
 Move to system in it's own folder and run. 
-`python3 gw_bulk.py`
+```python3 gw_bulk.py```
 
 Answer required questions. 
 
 In separate session. 
-`tail -F log.log`
+```tail -F log.log```
+
+# Folders
+
+'output' - CSV and JSON files can be found in output folder
+'scripts' - Locally generated and removed when code is done running
 
