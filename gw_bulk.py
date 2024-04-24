@@ -51,6 +51,8 @@ class bulk:
         self.setup()
         self.targets()
         self.results()
+        if self.debug == 1: 
+            self.printtables()
         if self.emailq != 'no':  
             self.email(f'{gwout}/{self.filename}_gw_bulk.tgz')
 
@@ -127,11 +129,11 @@ Takes about 20 minutes to run 'uptime' on 300+ gateways'''
         print(f'''Monitor progress in separate session\n
 # tail -F {gwpath}/log.log''')
 
-        global debug
+        
         if a['debug'] is True: 
-            debug = 1
+            self.debug = 1
         else: 
-            debug = 0 
+            self.debug = 0 
 
 
     # make log directory / clear old log files
@@ -161,11 +163,8 @@ source $MDS_SYSTEM/shared/sh_utilities.sh
 exit 0
 """
 
-        if debug == 1:
-            Log.debug(f'''[ contents ]\n{bash}\n 
-    [ script]\n{script}
-    [[ Does everything look right? ]]\n''')
-            self.pause_debug()
+        if self.debug == 1:
+            Log.debug(f'''[ contents ]\n{bash}\n[ script]\n{script}''')
 
         with open(script, 'w') as f: 
             f.write(bash)
@@ -182,9 +181,8 @@ exit 0
             Log.error(traceback.print_exc())
             Log.error(f"[runcmd] : Error : {e}")
 
-        if debug == 1: 
+        if self.debug == 1: 
             Log.debug(f"[runcmd]\n{cmdout}\n\n")
-            self.pause_debug()
         
         return cmdout
     
@@ -353,9 +351,9 @@ cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{self.command}"'''
         with smtplib.SMTP(self.smtpserver) as server: 
             server.send_message(msg)
             server.quit()
-
-    def pause_debug(self):
-        input("[PAUSE_DEBUG] Press any key to continue...\n\n") 
+        
+    def printtables(self): 
+        Log.info(f'{self.inventory}\n\n{self.failures}\n\n{self.mapping}\n\n{self.stdout}')
 
 
 # script exit 
