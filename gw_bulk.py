@@ -47,20 +47,16 @@ class bulk:
         self.failures = {}
         self.inventory = {}
         self.stdout = {}
+        self.domainlist = {}
         self.setup()
         self.targets()
         self.results()
-        # Email results
         if self.emailq != 'no':  
             self.email(f'{gwout}/{self.filename}_gw_bulk.tgz')
-        
-        # remove files with username/passwords
-        self.cleanup()
 
     def setup(self): 
         self.args()
         self.mkdir()
-        self.cleanup()
     
     def targets(self): 
         self.domains()
@@ -140,7 +136,6 @@ Takes about 20 minutes to run 'uptime' on 300+ gateways'''
 
     # make log directory / clear old log files
     def mkdir(self):
-        Log.info(f'[ mkdir | {gwpath} | {gwbin} | {gwout}]\n')
 
         if os.path.isdir(gwpath) and os.path.isdir(gwbin) and os.path.isdir(gwout):
             Log.info(f'[Make Directories]... Exists!\n')
@@ -148,8 +143,7 @@ Takes about 20 minutes to run 'uptime' on 300+ gateways'''
             Log.info(f'[Make Directories]... Does not exist\n')
             os.system(f'mkdir -v {gwpath} {gwbin} {gwout}')
             
-            
-        # create bash scripts
+    # create bash scripts
     def runcmd(self, cmd, script):
         
         shell = '#!/bin/bash'
@@ -162,6 +156,7 @@ source $MDS_SYSTEM/shared/sh_utilities.sh
         script = f'{gwbin}/{script}'
         bash=f"""{shell} 
 {cpprofile} 
+
 {cmd} 
 exit 0
 """
@@ -193,66 +188,8 @@ exit 0
         
         return cmdout
     
-    # create output 
-    def output(self): 
-        count = 0
-        failcount = 0
-        errorcount = 0
-        # test connectivity
-        def testconn(ip, port, tmout): 
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(tmout)
-            result = s.connect_ex((ip,int(port)))
-            return result
-        
-        try:
-            for domain in self.inventory.keys():
-                for gwip in self.inventory[domain]:
-                    if testconn(gwip, 18208, 5) != 0:
-                        failcount += 1
-                        Log.info(f"[testconn] : Check connectivity : {gwip}:18208 : Count {failcount}\n")
-                        self.failures[gwip] = f"No connectivity on port 18208, Count {failcount}"
-                    else:
-                        count += 1
-                        Log.info(f"[output] : {self.command} : {domain} | {gwip} : Count {count}\n")
-                        # segfault (null buff) from os causes subprocess to fail
-                        # and causes the entire script to exit, try/except does not work
-                        # requires 'exit 0' at end of bash script
-                        cmd = f'''mdsenv {domain}
-cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{self.command}"'''
-                        result = self.runcmd(cmd, 'tmp_bash_gw-{gwip}_tmp.sh')
-                        
-                        if len(result) == 0:
-                            errorcount += 1
-                            Log.info(f"[output] : Output Empty : {gwip} : Count {errorcount}\n")
-                            self.failures[gwip] = f"Empty Output {errorcount}"
-                        elif 'NULL' in result:
-                            errorcount += 1
-                            Log.info(f"[output] : (NULL BUF) : {gwip} : Count {errorcount}\n")
-                            self.failures[gwip] = f"CPRID Error : (NULL BUF) : Count {errorcount}"
-                        else:
-                            self.stdout[gwip] = result.strip()
-        
-        except Exception as e:
-            Log.error(traceback.print_exc())
-            Log.error(f"[output] : Error : {e}\n")
-            
-        # creating mapping of gateway to domain for later use
-        try:
-            for gw in self.stdout.keys(): 
-                for key,value in self.inventory.items(): 
-                    if gw in value: 
-                        self.mapping[gw] = [key] 
-        except Exception as e:
-            Log.error(f"Error {e}\n")
-        
-
-
-
     # make list of CMA IP Addresses
     def domains(self):
-        
-        self.domainlist = {}
         
         if self.targetdomain == 'all': 
             cmd = "mdsstat | grep -i cma | awk '{print $6}' | grep -v 138.108.2.29"
@@ -278,8 +215,7 @@ cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{self.command}"'''
                 count = 0
                 for cmd in cmdlist: 
                     count += 1
-                    script = f'tmp_gateways_{count}_{domain}_tmp.sh'
-                    gwlist = self.runcmd(cmd, script).split()
+                    gwlist = self.runcmd(cmd, f'tmp_gateways_{count}_{domain}_tmp.sh').split()
                     for i in gwlist: 
                         self.inventory[domain].append(i)
                     
@@ -287,8 +223,61 @@ cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{self.command}"'''
             Log.error(traceback.print_exc())
             Log.error(f"[gateways] : Error {e}\n")
 
-        Log.info(f"[gateways] : Gateway List Complete")
+        Log.info(f"[gateways] : Gateway List Complete")    
 
+    # create output 
+    def output(self):
+        count = 0
+        failcount = 0
+        errorcount = 0
+        # test connectivity
+        def testconn(ip, port, tmout): 
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(tmout)
+            result = s.connect_ex((ip,int(port)))
+            return result
+        
+        try:
+            for domain in self.inventory.keys():
+                for gwip in self.inventory[domain]:
+                    if testconn(gwip, 18208, 5) != 0:
+                        failcount += 1
+                        Log.info(f"[testconn] : Check connectivity : {gwip}:18208 : Count {failcount}\n")
+                        self.failures[gwip] = f"No connectivity on port 18208, Count {failcount}"
+                    else:
+                        count += 1
+                        Log.info(f"[output] : {self.command} : {domain} | {gwip} : Count {count}\n")
+                        # segfault (null buff) from os causes subprocess to fail
+                        # and causes the entire script to exit, try/except does not work
+                        # requires 'exit 0' at end of bash script
+                        cmd = f'''mdsenv {domain}
+cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{self.command}"'''
+                        result = self.runcmd(cmd, f'tmp_bash_gw-{gwip}_tmp.sh')
+                        
+                        if len(result) == 0:
+                            errorcount += 1
+                            Log.info(f"[output] : Output Empty : {gwip} : Count {errorcount}\n")
+                            self.failures[gwip] = f"Empty Output {errorcount}"
+                        elif 'NULL' in result:
+                            errorcount += 1
+                            Log.info(f"[output] : (NULL BUF) : {gwip} : Count {errorcount}\n")
+                            self.failures[gwip] = f"CPRID Error : (NULL BUF) : Count {errorcount}"
+                        else:
+                            self.stdout[gwip] = result.strip()
+        
+        except Exception as e:
+            Log.error(traceback.print_exc())
+            Log.error(f"[output] : Error : {e}\n")
+            
+        # creating mapping of gateway to domain for later use
+        try:
+            for gw in self.stdout.keys(): 
+                for key,value in self.inventory.items(): 
+                    if gw in value: 
+                        self.mapping[gw] = [key] 
+        except Exception as e:
+            Log.error(f"Error {e}\n")
+        
 
     def writefiles(self):
             
@@ -365,11 +354,6 @@ cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{self.command}"'''
             server.send_message(msg)
             server.quit()
 
-
-    ### simple functions ###
-    def cleanup(self):
-        os.system(f"rm {gwbin}/*.sh")
-
     def pause_debug(self):
         input("[PAUSE_DEBUG] Press any key to continue...\n\n") 
 
@@ -377,6 +361,10 @@ cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{self.command}"'''
 # script exit 
 def end(): 
     sys.exit(0)
+        
+# remove scripts with usernames and passwords
+def cleanup():
+    os.system(f"rm {gwbin}/*.sh")
 
 
 def main(): 
@@ -387,6 +375,7 @@ def main():
 if __name__ == "__main__": 
     
     try:
+        cleanup()
         starttime = time.time()
         Log.info(f"Start Time: {starttime}")
         main()
@@ -397,4 +386,5 @@ if __name__ == "__main__":
         endtime = time.time()
         totaltime = endtime - starttime
         Log.info(f"\n Total Run Time : {totaltime} seconds")
+        cleanup()
         end()

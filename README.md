@@ -4,7 +4,7 @@ Configure many, many Check Point firewalls
 
 # Scope
 
-Check Point Software, Multi-Domain and Standalone Management
+Check Point Software, R80.x, R81.x, R82.x Multi-Domain and Standalone Management
 
 # Instructions
 
@@ -18,7 +18,7 @@ Check Point Software, Multi-Domain and Standalone Management
 
 # Folders
 
--  'output' - CSV and JSON files can be found in output folder
+- 'output' - CSV and JSON files can be found in output folder
 
-- 'scripts' - Locally generated and removed when code is done running
+- 'scripts' - Locally generated shell scripts. Removed when code is finished running.
 
