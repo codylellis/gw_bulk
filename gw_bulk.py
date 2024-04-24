@@ -362,8 +362,11 @@ def end():
     sys.exit(0)
         
 # remove scripts with usernames and passwords
-def cleanup():
-    os.system(f"rm {gwbin}/*.sh")
+def cleanup(step):
+    if step == 'post': 
+        os.system(f"rm {gwbin}/*")
+    if step == 'pre': 
+        os.system(f"rm {gwbin}/* {gwout}/*")
 
 
 def main(): 
@@ -374,7 +377,7 @@ def main():
 if __name__ == "__main__": 
     
     try:
-        cleanup()
+        cleanup('pre')
         starttime = time.time()
         Log.info(f"Start Time: {starttime}")
         main()
@@ -385,5 +388,5 @@ if __name__ == "__main__":
         endtime = time.time()
         totaltime = endtime - starttime
         Log.info(f"\n Total Run Time : {totaltime} seconds")
-        cleanup()
+        cleanup('post')
         end()
