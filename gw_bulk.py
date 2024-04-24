@@ -42,19 +42,18 @@ class Log:
 
 class bulk: 
     def __init__(self): 
-        self.mapping = {}
-        self.gmapping = {}
-        self.failures = {}
-        self.inventory = {}
-        self.stdout = {}
-        self.domainlist = {}
+        self.mapping = {} # successful connection with gateways
+        self.failures = {} # no connectivity or CPRID issue 
+        self.inventory = {} # domain to gateway mapping 
+        self.stdout = {} # gateways with commmand output
+        self.domainlist = [] # list of domains 
         self.setup()
         self.targets()
         self.results()
         if self.debug == 1: 
             self.printtables()
         if self.emailq != 'no':  
-            self.email(f'{gwout}/{self.filename}_gw_bulk.tgz')
+            self.ugotmail(f'{gwout}/{self.filename}_gw_bulk.tgz')
 
     def setup(self): 
         self.args()
@@ -66,6 +65,7 @@ class bulk:
     
     def results(self): 
         self.output()
+        self.writefiles()
         
 
     def args(self): 
@@ -81,7 +81,7 @@ cellis@checkpoint.com
 CPRID (NULL BUF) troubleshooting sk174346
 
 [Scope]
-MDM or SMS 
+Check Point Software - MDM or SMS 
 
 [Instructions]
 1: Provide Username and Password of MDM administrator as well as command to run on all gateways.
@@ -104,11 +104,16 @@ Takes about 20 minutes to run 'uptime' on 300+ gateways'''
         parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS,
                     help='')
         
-        a = vars(parser.parse_args())
+        arguments = vars(parser.parse_args())
+        
+        if arguments['debug'] is True: 
+            self.debug = 1
+        else: 
+            self.debug = 0 
         
         parser.name = input("Username: ")
         parser.pw = input("Password: ")
-        parser.domain = input("'all' Domains or IP of specific Domain: ")
+        parser.domain = input("MDM: 'all' for all Domains or IP of specific Domain\nSMS: Main IP\nAnswer: ")
         parser.command = input("Command to run on all gateways: ")
         parser.emailq = input("[yes or no] Email? : ")
         if parser.emailq != 'no': 
@@ -128,12 +133,6 @@ Takes about 20 minutes to run 'uptime' on 300+ gateways'''
         
         print(f'''Monitor progress in separate session\n
 # tail -F {gwpath}/log.log''')
-
-        
-        if a['debug'] is True: 
-            self.debug = 1
-        else: 
-            self.debug = 0 
 
 
     # make log directory / clear old log files
@@ -280,22 +279,21 @@ cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{self.command}"'''
     def writefiles(self):
             
         jfiles = {'inventory.json' : self.inventory,
-                 'mapping.json' : self.mapping, 
-                 'failures.json' : self.failures,
-                 'stdout.json' : self.stdout} 
+                'mapping.json' : self.mapping, 
+                'failures.json' : self.failures,
+                'stdout.json' : self.stdout} 
         
         for name,jout in jfiles.items(): 
             with open(f'{gwout}/{name}', 'w') as f:
                 f.write(json.dumps(jout, indent=4, sort_keys=False))
         
         # make csv of stdout information 
-        fcsv = f'{gwout}/gw_stdout.csv'
+        fcsv = f'{gwout}/stdout.csv'
         with open(fcsv, 'w') as f:
             w = csv.writer(f)
             w.writerows(self.stdout.items())
         
-        cmd = f'tar -czvf {gwout}/{self.filename}_gw_bulk.tgz {gwout}/*.csv {gwout}/*.json'        
-        self.runcmd(cmd, 'tar_stdout.sh')
+
 
 
     def report(self): 
@@ -326,22 +324,23 @@ cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{self.command}"'''
             Log.error(f"[ report ] : Error {e}\n")
 
 
-    def email(self, FN): 
+    def ugotmail(self, FN): 
         self.report()
         
+        cmd = f'tar -czvf {gwout}/{self.filename}_gw_bulk.tgz {gwout}/*.csv {gwout}/*.json'        
+        self.runcmd(cmd, 'tar_stdout.sh')
+            
         msg = EmailMessage()
         msg['Subject'] = f'{self.filename} gw_bulk'
-        msg['From'] = "checkpointmgmt@checkpoint.com"
+        msg['From'] = "checkpointmgmt@gwbulk.com"
         msg['To'] = self.emailacc
         
-        msg.set_content(f'''
-    No output or cprid failed
-    {self.cprid}
+        
+        msg.set_content(f'''No output or cprid failed
+{self.cprid}
 
-    No connectivity to gateway
-    {self.failed}
-    '''
-        )
+No connectivity to gateway
+{self.failed}''')
         
         with open(FN, 'rb') as f: 
             file_data = f.read()
@@ -349,8 +348,10 @@ cprid_util -server {gwip} -verbose rexec -rcmd bash -c "{self.command}"'''
         msg.add_attachment(file_data, maintype='text', subtype='plain', filename=f'{self.filename}.tgz')
         
         with smtplib.SMTP(self.smtpserver) as server: 
+            Log.info(f"Email Sent : {msg['Subject']} : {msg['From']}' : {msg['To']}")
             server.send_message(msg)
             server.quit()
+        
         
     def printtables(self): 
         Log.info(f'{self.inventory}\n\n{self.failures}\n\n{self.mapping}\n\n{self.stdout}')
